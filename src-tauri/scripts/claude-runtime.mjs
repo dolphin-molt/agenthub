@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import {
   createSdkMcpServer,
   query,
@@ -478,6 +479,53 @@ function buildUiPrompt(payload) {
     .join("\n");
 }
 
+export function buildClaudeQueryOptions({ payload, bundle, agenthubServer }) {
+  const env = {
+    ...process.env,
+    CLAUDE_AGENT_SDK_CLIENT_APP: "agenthub/0.1.0",
+  };
+
+  if (payload.authSource === "claude-subscription") {
+    delete env.ANTHROPIC_API_KEY;
+    delete env.ANTHROPIC_BASE_URL;
+    delete env.ANTHROPIC_MODEL;
+  }
+
+  return {
+    cwd: payload.cwd || process.cwd(),
+    model: payload.model || undefined,
+    tools: {
+      type: "preset",
+      preset: "claude_code",
+    },
+    permissionMode: "bypassPermissions",
+    allowDangerouslySkipPermissions: true,
+    maxTurns: payload.maxTurns || 10,
+    resume: payload.runtimeSessionId || undefined,
+    persistSession: true,
+    includePartialMessages: true,
+    thinking: {
+      type: "disabled",
+    },
+    systemPrompt: {
+      type: "preset",
+      preset: "claude_code",
+      append: buildUiPrompt({
+        threadTitle: bundle?.thread?.title,
+        agentName: payload.agentName,
+        outputSurface: payload.outputSurface,
+      }),
+    },
+    mcpServers: {
+      agenthub: agenthubServer,
+    },
+    env,
+    stderr(data) {
+      process.stderr.write(data);
+    },
+  };
+}
+
 async function runQuery(payload) {
   const hub = await readHubConfig();
   const memoryConfig = normalizeMemoryProvider(hub.memory || hub.memos || {});
@@ -599,38 +647,11 @@ async function runQuery(payload) {
 
   const stream = query({
     prompt: payload.prompt,
-    options: {
-      cwd: payload.cwd || process.cwd(),
-      model: payload.model || undefined,
-      tools: {
-        type: "preset",
-        preset: "claude_code",
-      },
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      maxTurns: payload.maxTurns || 10,
-      resume: payload.runtimeSessionId || undefined,
-      persistSession: true,
-      includePartialMessages: true,
-      systemPrompt: {
-        type: "preset",
-        preset: "claude_code",
-        append: buildUiPrompt({
-          threadTitle: bundle?.thread?.title,
-          agentName: payload.agentName,
-        }),
-      },
-      mcpServers: {
-        agenthub: agenthubServer,
-      },
-      env: {
-        ...process.env,
-        CLAUDE_AGENT_SDK_CLIENT_APP: "agenthub/0.1.0",
-      },
-      stderr(data) {
-        process.stderr.write(data);
-      },
-    },
+    options: buildClaudeQueryOptions({
+      payload,
+      bundle,
+      agenthubServer,
+    }),
   });
 
   for await (const message of stream) {
@@ -748,4 +769,10 @@ async function main() {
   }
 }
 
-await main();
+const entryHref = process.argv[1]
+  ? pathToFileURL(process.argv[1]).href
+  : null;
+
+if (entryHref && import.meta.url === entryHref) {
+  await main();
+}

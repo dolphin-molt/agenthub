@@ -11,6 +11,7 @@ import { useAgentsStore } from "@/stores/agents-store";
 import { useModeStore } from "@/stores/mode-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { useCollaborationStore } from "@/stores/collaboration-store";
+import { startCollaborationLiveSync } from "@/stores/collaboration-live-sync";
 import type { DetectedAgent } from "@/lib/types/agents";
 
 interface NavItem { label: string; icon: React.ReactNode; path: string; }
@@ -232,9 +233,7 @@ function WorkChatThreads({ collapsed }: { collapsed: boolean }) {
   const inChatRoute = location.pathname.startsWith("/work/chat");
   const showParentHighlight = inChatRoute && !activeThreadId;
 
-  useEffect(() => {
-    void loadThreads();
-  }, [loadThreads]);
+  useEffect(() => startCollaborationLiveSync(loadThreads), [loadThreads]);
 
   useEffect(() => {
     if (inChatRoute) {

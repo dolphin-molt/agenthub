@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agenthub-relay",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-03",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "agenthub-relay",
+      "database_id": "5c9f62fb-f34f-409d-8b47-3bd125c569c6"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "HOST_ROOM",
+        "class_name": "HostRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "HostRoom"
+      ]
+    }
+  ]
+}

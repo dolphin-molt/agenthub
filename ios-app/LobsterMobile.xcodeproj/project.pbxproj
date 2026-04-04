@@ -15,6 +15,8 @@
 		A10000010000000000000006 /* RootChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000006 /* RootChatView.swift */; };
 		A10000010000000000000007 /* HistoryDrawerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000007 /* HistoryDrawerView.swift */; };
 		A10000010000000000000008 /* ConnectionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000008 /* ConnectionSheet.swift */; };
+		A10000010000000000000009 /* RelayModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000000B /* RelayModels.swift */; };
+		A1000001000000000000000A /* RelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000000C /* RelayClient.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,6 +31,8 @@
 		A20000010000000000000008 /* ConnectionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionSheet.swift; sourceTree = "<group>"; };
 		A20000010000000000000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000001000000000000000A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A2000001000000000000000B /* RelayModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayModels.swift; sourceTree = "<group>"; };
+		A2000001000000000000000C /* RelayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -82,6 +86,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000010000000000000002 /* BridgeModels.swift */,
+				A2000001000000000000000B /* RelayModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -91,6 +96,7 @@
 			children = (
 				A20000010000000000000003 /* BridgeConfigStore.swift */,
 				A20000010000000000000004 /* BridgeClient.swift */,
+				A2000001000000000000000C /* RelayClient.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -193,8 +199,10 @@
 			files = (
 				A10000010000000000000001 /* LobsterMobileApp.swift in Sources */,
 				A10000010000000000000002 /* BridgeModels.swift in Sources */,
+				A10000010000000000000009 /* RelayModels.swift in Sources */,
 				A10000010000000000000003 /* BridgeConfigStore.swift in Sources */,
 				A10000010000000000000004 /* BridgeClient.swift in Sources */,
+				A1000001000000000000000A /* RelayClient.swift in Sources */,
 				A10000010000000000000005 /* ChatStore.swift in Sources */,
 				A10000010000000000000006 /* RootChatView.swift in Sources */,
 				A10000010000000000000007 /* HistoryDrawerView.swift in Sources */,
@@ -321,7 +329,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"\"";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 5U8X23W7KZ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/Resources/Info.plist;
@@ -350,7 +358,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"\"";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 5U8X23W7KZ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/Resources/Info.plist;
@@ -376,20 +384,20 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A60000000000000000000003 /* Build configuration list for PBXProject "LobsterMobile" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A70000000000000000000001 /* Debug */,
-				A70000000000000000000002 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		A60000000000000000000002 /* Build configuration list for PBXNativeTarget "LobsterMobile" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A70000000000000000000003 /* Debug */,
 				A70000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A60000000000000000000003 /* Build configuration list for PBXProject "LobsterMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A70000000000000000000001 /* Debug */,
+				A70000000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

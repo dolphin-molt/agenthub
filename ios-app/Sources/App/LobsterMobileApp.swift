@@ -7,6 +7,11 @@ struct LobsterMobileApp: App {
     var body: some Scene {
         WindowGroup {
             RootChatView(store: store)
+                .onOpenURL { url in
+                    Task {
+                        await store.handleIncomingPairingURL(url)
+                    }
+                }
         }
     }
 }

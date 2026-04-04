@@ -8,5 +8,6 @@ pub mod custom_agents;
 pub mod health;
 pub mod memory;
 pub mod monitor;
+pub mod relay;
 pub mod remote;
 pub mod skills;

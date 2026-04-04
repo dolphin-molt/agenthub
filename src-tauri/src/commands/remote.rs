@@ -33,6 +33,14 @@ pub struct RemoteBridgeLogTail {
     pub updated_at: String,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RemoteRelayConfig {
+    pub relay_base_url: Option<String>,
+    pub relay_host_id: Option<String>,
+    pub relay_host_display_name: Option<String>,
+    pub relay_state_path: Option<String>,
+}
+
 fn agenthub_dir() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
     let dir = home.join(".agenthub");
@@ -274,7 +282,10 @@ fn stop_remote_bridge_internal() -> Result<RemoteBridgeStatus, String> {
     Ok(status)
 }
 
-fn spawn_remote_bridge(force_restart: bool) -> Result<RemoteBridgeStatus, String> {
+pub(crate) fn spawn_remote_bridge(
+    force_restart: bool,
+    relay_config: Option<RemoteRelayConfig>,
+) -> Result<RemoteBridgeStatus, String> {
     if force_restart {
         let _ = stop_remote_bridge_internal();
     } else {
@@ -352,6 +363,20 @@ fn spawn_remote_bridge(force_restart: bool) -> Result<RemoteBridgeStatus, String
         "AGENTHUB_REMOTE_BRIDGE_LOG_PATH",
         log_path.to_string_lossy().to_string(),
     );
+    if let Some(relay) = relay_config {
+        if let Some(relay_base_url) = relay.relay_base_url {
+            command.env("AGENTHUB_RELAY_BASE_URL", relay_base_url);
+        }
+        if let Some(relay_host_id) = relay.relay_host_id {
+            command.env("AGENTHUB_RELAY_HOST_ID", relay_host_id);
+        }
+        if let Some(relay_host_display_name) = relay.relay_host_display_name {
+            command.env("AGENTHUB_RELAY_HOST_DISPLAY_NAME", relay_host_display_name);
+        }
+        if let Some(relay_state_path) = relay.relay_state_path {
+            command.env("AGENTHUB_RELAY_AGENT_STATE_PATH", relay_state_path);
+        }
+    }
     with_augmented_path(&mut command);
 
     let output = command
@@ -429,7 +454,7 @@ pub fn get_remote_bridge_status() -> Result<RemoteBridgeStatus, String> {
 
 #[tauri::command]
 pub fn sync_remote_bridge(force_restart: Option<bool>) -> Result<RemoteBridgeStatus, String> {
-    spawn_remote_bridge(force_restart.unwrap_or(false))
+    spawn_remote_bridge(force_restart.unwrap_or(false), None)
 }
 
 #[tauri::command]

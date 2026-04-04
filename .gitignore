@@ -1,6 +1,7 @@
 node_modules/
 dist/
 target/
+.worktrees/
 .DS_Store
 *.tsbuildinfo
 .playwright-cli/

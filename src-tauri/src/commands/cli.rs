@@ -39,6 +39,20 @@ struct ProviderEndpointConfig {
     api_type: Option<String>,
 }
 
+#[derive(Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct ProviderAudioConfig {
+    transcription_model: Option<String>,
+    #[allow(dead_code)]
+    realtime_asr_model: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct ProviderVisionConfig {
+    reasoning_model: Option<String>,
+}
+
 #[derive(Deserialize, Clone)]
 struct ProviderConfig {
     id: String,
@@ -50,6 +64,39 @@ struct ProviderConfig {
     base_url: Option<String>,
     #[serde(rename = "apiType")]
     api_type: Option<String>,
+    audio: Option<ProviderAudioConfig>,
+    vision: Option<ProviderVisionConfig>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ResolvedTranscriptionTarget {
+    provider_id: String,
+    provider_name: String,
+    api_key: String,
+    endpoint: String,
+    model: String,
+}
+
+#[derive(Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct HubMediaVoiceConfig {
+    asr_provider_id: Option<String>,
+    asr_model_id: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct HubMediaVideoConfig {
+    reasoning_provider_id: Option<String>,
+    reasoning_model_id: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct HubMediaConfig {
+    voice: Option<HubMediaVoiceConfig>,
+    #[allow(dead_code)]
+    video: Option<HubMediaVideoConfig>,
 }
 
 #[derive(Deserialize)]
@@ -58,6 +105,7 @@ pub struct AudioTranscriptionPayload {
     pub audio_base64: String,
     pub mime_type: String,
     pub provider_id: Option<String>,
+    pub model_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -113,6 +161,17 @@ fn get_hub_providers() -> Result<Vec<ProviderConfig>, String> {
         .map_err(|error| format!("Failed to parse provider config: {}", error))
 }
 
+fn get_hub_media_config() -> Result<Option<HubMediaConfig>, String> {
+    let hub = super::config::read_hub_config()?;
+    let Some(media) = hub.get("media").cloned() else {
+        return Ok(None);
+    };
+
+    serde_json::from_value(media)
+        .map(Some)
+        .map_err(|error| format!("Failed to parse media config: {}", error))
+}
+
 fn agenthub_dir() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
     let dir = home.join(".agenthub");
@@ -141,14 +200,78 @@ fn agenthub_audio_clips_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn resolve_transcription_provider(provider_id: Option<&str>) -> Result<ProviderConfig, String> {
-    let requested_id = provider_id.unwrap_or("bigmodel");
-    let providers = get_hub_providers()?;
+fn default_clip_transcription_model() -> &'static str {
+    "glm-asr-2512"
+}
 
-    providers
-        .into_iter()
+fn configured_transcription_model(provider: &ProviderConfig) -> Option<String> {
+    provider
+        .audio
+        .as_ref()
+        .and_then(|audio| audio.transcription_model.clone())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_transcription_target_from_hub_config(
+    providers: &[ProviderConfig],
+    media_config: Option<&HubMediaConfig>,
+    provider_id: Option<&str>,
+    model_id: Option<&str>,
+) -> Result<ResolvedTranscriptionTarget, String> {
+    let requested_id = provider_id
+        .or_else(|| media_config.and_then(|media| media.voice.as_ref()?.asr_provider_id.as_deref()))
+        .unwrap_or("bigmodel");
+    let provider = providers
+        .iter()
         .find(|provider| provider.id == requested_id)
-        .ok_or_else(|| format!("Provider '{}' not found", requested_id))
+        .cloned()
+        .ok_or_else(|| format!("Provider '{}' not found", requested_id))?;
+
+    let api_key = provider
+        .api_key
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("Provider '{}' has no API key configured", provider.id))?;
+    let base_url = resolve_openai_endpoint(&provider)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "Provider '{}' has no OpenAI-compatible endpoint configured",
+                provider.id
+            )
+        })?;
+    let model = model_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            media_config
+                .and_then(|media| media.voice.as_ref()?.asr_model_id.clone())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+        .or_else(|| configured_transcription_model(&provider))
+        .unwrap_or_else(|| default_clip_transcription_model().to_string());
+
+    Ok(ResolvedTranscriptionTarget {
+        provider_id: provider.id.clone(),
+        provider_name: provider
+            .name
+            .clone()
+            .unwrap_or_else(|| "语音转写".to_string()),
+        api_key,
+        endpoint: transcription_endpoint(&base_url),
+        model,
+    })
+}
+
+fn resolve_transcription_target(
+    provider_id: Option<&str>,
+    model_id: Option<&str>,
+) -> Result<ResolvedTranscriptionTarget, String> {
+    let providers = get_hub_providers()?;
+    let media_config = get_hub_media_config()?;
+    resolve_transcription_target_from_hub_config(&providers, media_config.as_ref(), provider_id, model_id)
 }
 
 fn resolve_openai_endpoint(provider: &ProviderConfig) -> Option<String> {
@@ -422,16 +545,10 @@ pub async fn prompt_open_microphone_settings(app: tauri::AppHandle) -> Result<bo
 pub async fn transcribe_audio_clip(
     payload: AudioTranscriptionPayload,
 ) -> Result<AudioTranscriptionResult, String> {
-    let provider = resolve_transcription_provider(payload.provider_id.as_deref())?;
-    let api_key = provider
-        .api_key
-        .clone()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| format!("Provider '{}' has no API key configured", provider.id))?;
-    let base_url = resolve_openai_endpoint(&provider)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| format!("Provider '{}' has no OpenAI-compatible endpoint configured", provider.id))?;
-    let endpoint = transcription_endpoint(&base_url);
+    let target = resolve_transcription_target(
+        payload.provider_id.as_deref(),
+        payload.model_id.as_deref(),
+    )?;
 
     let (_temp_dir, input_path) = write_payload_to_temp_audio(&payload.audio_base64, &payload.mime_type)?;
     let upload_path = ensure_supported_audio_file(&input_path)?;
@@ -444,7 +561,7 @@ pub async fn transcribe_audio_clip(
         .to_string();
 
     let form = reqwest::multipart::Form::new()
-        .text("model", "glm-asr-2512")
+        .text("model", target.model.clone())
         .text("stream", "false")
         .part(
             "file",
@@ -456,8 +573,8 @@ pub async fn transcribe_audio_clip(
 
     let client = reqwest::Client::new();
     let response = client
-        .post(endpoint)
-        .header("Authorization", format!("Bearer {}", api_key))
+        .post(target.endpoint.clone())
+        .header("Authorization", format!("Bearer {}", target.api_key))
         .header("User-Agent", "AgentHub/0.1.0")
         .multipart(form)
         .send()
@@ -492,9 +609,9 @@ pub async fn transcribe_audio_clip(
 
     Ok(AudioTranscriptionResult {
         text,
-        provider_id: provider.id,
-        provider_name: provider.name.unwrap_or_else(|| "语音转写".to_string()),
-        model: "glm-asr-2512".to_string(),
+        provider_id: target.provider_id,
+        provider_name: target.provider_name,
+        model: target.model,
     })
 }
 
@@ -623,6 +740,109 @@ pub async fn run_claude_sdk_cmd(window: tauri::Window, payload: serde_json::Valu
     })
     .await
     .map_err(|e| format!("Claude SDK task join error: {}", e))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        resolve_transcription_target_from_hub_config, transcription_endpoint, HubMediaConfig,
+        ProviderConfig,
+    };
+
+    #[test]
+    fn resolve_transcription_target_prefers_provider_audio_model() {
+        let providers: Vec<ProviderConfig> = serde_json::from_value(serde_json::json!([
+            {
+                "id": "volcengine",
+                "name": "豆包 Doubao",
+                "apiKey": "test-key",
+                "endpoints": [
+                    {
+                        "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+                        "apiType": "openai"
+                    }
+                ],
+                "audio": {
+                    "transcriptionModel": "doubao-asr-realtime-preview"
+                }
+            }
+        ]))
+        .expect("provider config should parse");
+
+        let target = resolve_transcription_target_from_providers(&providers, Some("volcengine"))
+            .expect("transcription target should resolve");
+
+        assert_eq!(target.provider_id, "volcengine");
+        assert_eq!(target.model, "doubao-asr-realtime-preview");
+        assert_eq!(
+            target.endpoint,
+            transcription_endpoint("https://ark.cn-beijing.volces.com/api/v3")
+        );
+    }
+
+    #[test]
+    fn resolve_transcription_target_prefers_hub_media_voice_override() {
+        let providers: Vec<ProviderConfig> = serde_json::from_value(serde_json::json!([
+            {
+                "id": "volcengine",
+                "name": "豆包 Doubao",
+                "apiKey": "test-key",
+                "endpoints": [
+                    {
+                        "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+                        "apiType": "openai"
+                    }
+                ],
+                "audio": {
+                    "transcriptionModel": "doubao-asr-realtime-preview"
+                }
+            }
+        ]))
+        .expect("provider config should parse");
+
+        let media: HubMediaConfig = serde_json::from_value(serde_json::json!({
+            "voice": {
+                "asrProviderId": "volcengine",
+                "asrModelId": "doubao-asr-streaming-v2"
+            }
+        }))
+        .expect("media config should parse");
+
+        let target = resolve_transcription_target_from_hub_config(
+            &providers,
+            Some(&media),
+            None,
+            None,
+        )
+        .expect("transcription target should resolve");
+
+        assert_eq!(target.provider_id, "volcengine");
+        assert_eq!(target.model, "doubao-asr-streaming-v2");
+    }
+
+    #[test]
+    fn resolve_transcription_target_falls_back_to_default_clip_model() {
+        let providers: Vec<ProviderConfig> = serde_json::from_value(serde_json::json!([
+            {
+                "id": "bigmodel",
+                "name": "智谱AI",
+                "apiKey": "test-key",
+                "endpoints": [
+                    {
+                        "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+                        "apiType": "openai"
+                    }
+                ]
+            }
+        ]))
+        .expect("provider config should parse");
+
+        let target = resolve_transcription_target_from_hub_config(&providers, None, Some("bigmodel"), None)
+            .expect("transcription target should resolve");
+
+        assert_eq!(target.provider_id, "bigmodel");
+        assert_eq!(target.model, "glm-asr-2512");
+    }
 }
 
 /// Find the openclaw binary path

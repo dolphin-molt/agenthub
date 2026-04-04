@@ -3,6 +3,18 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { spawn } from "node:child_process";
+import {
+  buildHostRegistrationPayload,
+  buildHostSyncRequest,
+  buildRelayApiUrl,
+  buildSessionSnapshotPayload,
+  createSerializedRunner,
+  extractRelayMediaDefaults,
+  fetchRelayJson,
+  processPendingRelayTurn,
+} from "./relay-agent.mjs";
+import { createGatewayCallController } from "./gateway-call-controller.mjs";
+import { executeGatewayTurn } from "./gateway-turn-executor.mjs";
 
 const projectRoot =
   process.env.AGENTHUB_PROJECT_ROOT ||
@@ -16,12 +28,22 @@ const claudeRuntimeScript = path.join(
 const statePath =
   process.env.AGENTHUB_REMOTE_BRIDGE_STATE_PATH ||
   path.join(os.homedir(), ".agenthub", "runtime", "remote-bridge.json");
+const relayStatePath =
+  process.env.AGENTHUB_RELAY_AGENT_STATE_PATH ||
+  path.join(os.homedir(), ".agenthub", "runtime", "relay-agent.json");
 const logPath = process.env.AGENTHUB_REMOTE_BRIDGE_LOG_PATH || "";
 const port = Math.max(
   1024,
   parseInt(process.env.AGENTHUB_REMOTE_BRIDGE_PORT || "18921", 10) || 18921,
 );
 const token = String(process.env.AGENTHUB_REMOTE_BRIDGE_TOKEN || "").trim();
+const relayBaseUrl = String(process.env.AGENTHUB_RELAY_BASE_URL || "").trim();
+const relayHostId = String(process.env.AGENTHUB_RELAY_HOST_ID || "").trim();
+const relayHostDisplayName =
+  String(process.env.AGENTHUB_RELAY_HOST_DISPLAY_NAME || "").trim() ||
+  os.hostname();
+const relayEnabled = relayBaseUrl.length > 0 && relayHostId.length > 0;
+const runtimeVersion = "0.1.0";
 
 if (!token) {
   throw new Error("Missing AGENTHUB_REMOTE_BRIDGE_TOKEN");
@@ -29,6 +51,7 @@ if (!token) {
 
 const hubPath = path.join(os.homedir(), ".agenthub", "hub.json");
 let activeThreadId = null;
+let activeRelayCall = null;
 let startedAt = new Date().toISOString();
 let lastRequestAt = null;
 
@@ -96,12 +119,48 @@ async function writeState(partial = {}) {
   await fs.writeFile(statePath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
 }
 
+async function writeRelayState(partial = {}, snapshot = null) {
+  if (!relayEnabled) {
+    return;
+  }
+
+  const hub = await readHubConfig();
+  const nextSnapshot = snapshot || buildSessionSnapshotPayload({ hostId: relayHostId, hub });
+  const mediaDefaults = extractRelayMediaDefaults(hub);
+  const next = {
+    running: true,
+    pid: process.pid,
+    status: "running",
+    relayBaseUrl,
+    hostId: relayHostId,
+    hostDisplayName: relayHostDisplayName,
+    sessionCount: nextSnapshot.sessions.length,
+    startedAt,
+    updatedAt: nowIso(),
+    lastSyncAt: nowIso(),
+    connectedAt: startedAt,
+    lastError: null,
+    activeCall: partial.activeCall ?? activeRelayCall,
+    mediaDefaults,
+    logPath,
+    ...partial,
+  };
+
+  await fs.mkdir(path.dirname(relayStatePath), { recursive: true });
+  await fs.writeFile(relayStatePath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+}
+
 async function markError(message) {
   await writeState({
     running: true,
     status: "error",
     lastError: String(message || "unknown_error"),
   });
+  await writeRelayState({
+    running: true,
+    status: "error",
+    lastError: String(message || "unknown_error"),
+  }).catch(() => {});
 }
 
 async function markStopped() {
@@ -111,6 +170,12 @@ async function markStopped() {
       pid: null,
       status: "stopped",
     });
+    await writeRelayState({
+      running: false,
+      pid: null,
+      status: "stopped",
+      connectedAt: null,
+    }).catch(() => {});
   } catch {
     // noop
   }
@@ -349,7 +414,7 @@ function recordThreadEvent(hub, params) {
   thread.updated_at = now;
 
   const event = {
-    id: nextId("event"),
+    id: params.eventId || nextId("event"),
     thread_id: params.threadId,
     board_version: boardVersion,
     event_type: params.eventType,
@@ -394,7 +459,7 @@ function formatThreadTitle(source) {
   return trimmed.length > 24 ? `${trimmed.slice(0, 24)}…` : trimmed;
 }
 
-function runClaudeRuntime(payload) {
+function runClaudeRuntime(payload, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [claudeRuntimeScript], {
       cwd: projectRoot,
@@ -407,15 +472,54 @@ function runClaudeRuntime(payload) {
 
     let stdout = "";
     let stderr = "";
+    let stdoutBuffer = "";
+
+    function processRuntimeLine(line) {
+      if (!line.startsWith("{")) {
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(line);
+        if (
+          parsed?.type === "partial" &&
+          typeof parsed.rawText === "string" &&
+          typeof options.onPartial === "function"
+        ) {
+          options.onPartial({
+            rawText: parsed.rawText,
+            runtimeSessionId: parsed.runtimeSessionId || payload.runtimeSessionId || null,
+          });
+        }
+      } catch {
+        // Ignore non-final malformed lines from the runtime stream.
+      }
+    }
 
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      stdout += text;
+      stdoutBuffer += text;
+
+      while (stdoutBuffer.includes("\n")) {
+        const newlineIndex = stdoutBuffer.indexOf("\n");
+        const line = stdoutBuffer.slice(0, newlineIndex).trim();
+        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+        if (line) {
+          processRuntimeLine(line);
+        }
+      }
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
     });
     child.on("error", reject);
     child.on("close", (code) => {
+      const trailing = stdoutBuffer.trim();
+      if (trailing) {
+        processRuntimeLine(trailing);
+      }
+
       const lines = stdout
         .split("\n")
         .map((line) => line.trim())
@@ -457,24 +561,144 @@ function runClaudeRuntime(payload) {
   });
 }
 
-async function runRuntimeTurn({ agentConfig, threadId, agentId, prompt, runtimeSessionId }) {
+async function runRuntimeTurn({ agentConfig, threadId, agentId, prompt, runtimeSessionId, onPartial }) {
   const runtimeFamily =
     agentConfig?.runtime_profile?.runtime_family || agentConfig?.runtimeFamily || "claude-code";
 
   switch (runtimeFamily) {
     case "claude-code":
-      return runClaudeRuntime({
-        prompt,
-        threadId,
-        agentId,
-        agentName: agentConfig?.name || agentId,
-        model: agentConfig?.runtime_profile?.default_model || null,
-        runtimeSessionId,
-        maxTurns: 12,
-      });
+      return runClaudeRuntime(
+        {
+          prompt,
+          threadId,
+          agentId,
+          agentName: agentConfig?.name || agentId,
+          authSource: agentConfig?.runtime_profile?.auth_source || null,
+          model: agentConfig?.runtime_profile?.default_model || null,
+          runtimeSessionId,
+          maxTurns: 12,
+          requestId: nextId("relay_turn"),
+        },
+        { onPartial },
+      );
     default:
       throw new Error(`当前 remote bridge 暂不支持 runtime: ${runtimeFamily}`);
   }
+}
+
+async function syncRelayHostOnce() {
+  if (!relayEnabled) {
+    return;
+  }
+
+  const hub = await readHubConfig();
+  const snapshot = buildSessionSnapshotPayload({ hostId: relayHostId, hub });
+  const mediaDefaults = extractRelayMediaDefaults(hub);
+  const request = buildHostSyncRequest({
+    relayBaseUrl,
+    host: {
+      ...buildHostRegistrationPayload({
+        hostId: relayHostId,
+        displayName: relayHostDisplayName,
+        platform: process.platform,
+        runtimeVersion,
+        capabilities: ["turns", "streaming", "session-list", "voice"],
+        connectedAt: startedAt,
+        mediaDefaults,
+      }),
+      connectedAt: startedAt,
+    },
+    snapshot,
+  });
+
+  await fetchRelayJson(
+    fetch,
+    request.url,
+    {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(request.body),
+    },
+  );
+
+  await writeRelayState(
+    {
+      connectedAt: startedAt,
+      lastError: null,
+      activeCall: activeRelayCall,
+      mediaDefaults,
+    },
+    snapshot,
+  );
+}
+
+async function reportRelayTurnProgress({ turnId, runtimeSessionId, agentId, assistantMessage }) {
+  if (!relayEnabled || !turnId || !assistantMessage) {
+    return;
+  }
+
+  await fetchRelayJson(
+    fetch,
+    buildRelayApiUrl(
+      relayBaseUrl,
+      `/hosts/${encodeURIComponent(relayHostId)}/turns/${encodeURIComponent(turnId)}/progress`,
+    ),
+    {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        runtimeSessionId: runtimeSessionId || null,
+        agentId: agentId || null,
+        assistantMessage,
+        updatedAt: nowIso(),
+      }),
+    },
+  );
+}
+
+async function executeTurnLocally({
+  message,
+  threadId,
+  agentId,
+  source,
+  createdFrom,
+  relayTurnId = null,
+}) {
+  const hub = await readHubConfig();
+  const result = await executeGatewayTurn({
+    hub,
+    message,
+    threadId,
+    agentId,
+    source,
+    createdFrom,
+    customAgents: readCustomAgents(hub),
+    writeHubConfig,
+    runRuntimeTurn,
+    onAssistantUpdate: relayTurnId
+      ? async ({ message: assistantMessage, runtimeSessionId }) => {
+          await reportRelayTurnProgress({
+            turnId: relayTurnId,
+            runtimeSessionId,
+            agentId: assistantMessage.agentId,
+            assistantMessage,
+          });
+        }
+      : async () => {},
+  });
+
+  activeThreadId = result.threadId;
+  await writeState();
+  if (relayEnabled) {
+    await syncRelayHostOnce();
+  }
+  return result;
 }
 
 function withCors(res) {
@@ -646,106 +870,15 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { ok: false, error: "message_required" });
       }
 
-      let threadId = String(body.threadId || "").trim();
-      let bundle = threadId ? getThreadBundle(hub, threadId) : null;
-
-      let agentId =
-        String(body.agentId || "").trim() ||
-        bundle?.thread?.primary_agent_id ||
-        customAgents[0]?.id ||
-        "dolphin";
-      const agentConfig = customAgents.find((agent) => agent.id === agentId);
-      if (!agentConfig) {
-        return sendJson(res, 400, {
-          ok: false,
-          error: `agent_not_found:${agentId}`,
-        });
-      }
-
-      if (!bundle) {
-        bundle = createThread(hub, {
-          title: String(body.title || "").trim() || formatThreadTitle(message),
-          goal: String(body.goal || "").trim() || message,
-          primaryAgentId: agentId,
-        });
-        threadId = bundle.thread.id;
-      }
-
-      activeThreadId = threadId;
-      bundle.thread.primary_agent_id = agentId;
-      bundle.thread.updated_at = nowIso();
-
-      const session = ensureThreadSession(hub, {
-        threadId,
-        agentId,
-        runtimeSessionId: null,
-        mode: "native",
+      const result = await executeTurnLocally({
+        message,
+        threadId: String(body.threadId || "").trim() || null,
+        agentId: String(body.agentId || "").trim() || null,
+        source: "remote-bridge",
+        createdFrom: "http",
       });
 
-      const userEvent = recordThreadEvent(hub, {
-        threadId,
-        eventType: "user_message",
-        title: "远程控制发来消息",
-        body: message,
-        agentId,
-        sessionId: session.id,
-        taskId: null,
-        payload: {
-          source: "remote-bridge",
-          createdFrom: "http",
-        },
-      });
-
-      const runtimeResult = await runRuntimeTurn({
-        agentConfig,
-        threadId,
-        agentId,
-        prompt: message,
-        runtimeSessionId: session.runtime_session_id || null,
-      });
-
-      session.runtime_session_id = runtimeResult.runtimeSessionId || session.runtime_session_id || null;
-      session.mode = "native";
-      session.status = "idle";
-      session.updated_at = nowIso();
-      session.last_seen_board_version = Math.max(
-        Number(session.last_seen_board_version || 0),
-        Number(bundle.board?.version || 1),
-      );
-
-      const assistantEvent = recordThreadEvent(hub, {
-        threadId,
-        eventType: "assistant_message",
-        title: `${agentConfig.name || agentId} 已回复`,
-        body: runtimeResult.rawText,
-        agentId,
-        sessionId: session.id,
-        taskId: null,
-        payload: {
-          source: "remote-bridge",
-          metadata: runtimeResult.metadata || null,
-          rawText: runtimeResult.rawText,
-        },
-      });
-
-      updateBoardAfterTurn(hub, {
-        threadId,
-        userContent: message,
-        response: runtimeResult.rawText,
-        agentId,
-      });
-
-      await writeHubConfig(hub);
-      await writeState();
-
-      return sendJson(res, 200, {
-        ok: true,
-        threadId,
-        agentId,
-        userMessage: buildMessageView(userEvent),
-        assistantMessage: buildMessageView(assistantEvent),
-        runtimeSessionId: session.runtime_session_id || null,
-      });
+      return sendJson(res, 200, result);
     }
 
     return sendJson(res, 404, {
@@ -769,6 +902,14 @@ server.on("clientError", (error, socket) => {
 
 server.listen(port, "0.0.0.0", async () => {
   await writeState();
+  if (relayEnabled) {
+    await syncRelayHostOnce().catch(async (error) => {
+      await writeRelayState({
+        status: "error",
+        lastError: String(error?.message || error),
+      }).catch(() => {});
+    });
+  }
   process.stdout.write(
     `${JSON.stringify({
       type: "ready",
@@ -779,13 +920,92 @@ server.listen(port, "0.0.0.0", async () => {
   );
 });
 
+let relaySyncTimer = null;
+let relayTurnTimer = null;
+let relayCallTimer = null;
+
+if (relayEnabled) {
+  const callController = createGatewayCallController({
+    relayBaseUrl,
+    hostId: relayHostId,
+    onAcceptCall: async (call) => {
+      activeRelayCall = call;
+      await writeRelayState({
+        activeCall: call,
+        lastError: null,
+      }).catch(() => {});
+    },
+  });
+
+  const runRelaySync = createSerializedRunner(async () => {
+    await syncRelayHostOnce();
+  });
+
+  relaySyncTimer = setInterval(() => {
+    void runRelaySync().catch(async (error) => {
+      await writeRelayState({
+        status: "error",
+        lastError: String(error?.message || error),
+      }).catch(() => {});
+    });
+  }, 5000);
+
+  const runRelayTurnPoll = createSerializedRunner(async () => {
+    await processPendingRelayTurn({
+      relayBaseUrl,
+      hostId: relayHostId,
+      executeTurn: async (turn) =>
+        executeTurnLocally({
+          message: turn.message,
+          threadId: turn.sessionId,
+          agentId: null,
+          source: "relay",
+          createdFrom: "relay",
+          relayTurnId: turn.turnId,
+        }),
+    });
+  });
+
+  relayTurnTimer = setInterval(() => {
+    void runRelayTurnPoll().catch(async (error) => {
+      await writeRelayState({
+        status: "error",
+        lastError: String(error?.message || error),
+      }).catch(() => {});
+    });
+  }, 2000);
+
+  const runRelayCallPoll = createSerializedRunner(async () => {
+    activeRelayCall = await callController.tick();
+    await writeRelayState({
+      activeCall: activeRelayCall,
+      lastError: null,
+    }).catch(() => {});
+  });
+
+  relayCallTimer = setInterval(() => {
+    void runRelayCallPoll().catch(async (error) => {
+      await writeRelayState({
+        status: "error",
+        lastError: String(error?.message || error),
+      }).catch(() => {});
+    });
+  }, 1500);
+}
+
 process.on("SIGTERM", async () => {
   await markStopped();
+  if (relaySyncTimer) clearInterval(relaySyncTimer);
+  if (relayTurnTimer) clearInterval(relayTurnTimer);
+  if (relayCallTimer) clearInterval(relayCallTimer);
   server.close(() => process.exit(0));
 });
 
 process.on("SIGINT", async () => {
   await markStopped();
+  if (relaySyncTimer) clearInterval(relaySyncTimer);
+  if (relayTurnTimer) clearInterval(relayTurnTimer);
+  if (relayCallTimer) clearInterval(relayCallTimer);
   server.close(() => process.exit(0));
 });
 

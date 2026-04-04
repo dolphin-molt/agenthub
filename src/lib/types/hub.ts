@@ -7,13 +7,39 @@ export interface ProviderEndpoint {
   label?: string;  // optional short label like "OpenAI compat" / "Anthropic compat"
 }
 
+export interface ProviderAudioConfig {
+  transcriptionModel?: string;
+  realtimeAsrModel?: string;
+}
+
+export interface ProviderVisionConfig {
+  reasoningModel?: string;
+}
+
 // Provider = a company/service that hosts models, with one API Key and one or more endpoints
 export interface ModelProvider {
   id: string;
   name: string;
   apiKey: string;
   endpoints: ProviderEndpoint[];
+  audio?: ProviderAudioConfig;
+  vision?: ProviderVisionConfig;
   region?: "global" | "cn";  // only for distinguishing same-brand providers with different sites
+}
+
+export interface HubMediaVoiceConfig {
+  asrProviderId?: string;
+  asrModelId?: string;
+}
+
+export interface HubMediaVideoConfig {
+  reasoningProviderId?: string;
+  reasoningModelId?: string;
+}
+
+export interface HubMediaConfig {
+  voice?: HubMediaVoiceConfig;
+  video?: HubMediaVideoConfig;
 }
 
 // Model = a specific model that can be served by one or more providers
@@ -48,6 +74,7 @@ export interface HubConfig {
   models: Model[];
   mcpServers: McpServer[];
   skills: { directories: string[] };
+  media?: HubMediaConfig;
 }
 
 // ── Provider Presets ──
