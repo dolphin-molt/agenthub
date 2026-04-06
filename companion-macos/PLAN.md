@@ -7,11 +7,11 @@
 - 一个常驻在桌面的 macOS 前台 companion
 - 用户的主要入口不是控制台，而是 companion
 - 用户通过它进行多轮 chat，只是 chat 的载体不再是大窗口
-- AgentHub 负责后台能力，不再承载默认前台体验
+- 现有后台系统负责能力执行，不再承载默认前台体验
 
 ### Companion 不是什么
 
-- 不是缩小版 AgentHub 配置页
+- 不是缩小版后台配置页
 - 不是单纯的灵动岛复制品
 - 不是只会聊天的悬浮气泡
 - 不是把整个控制台塞进一个透明窗口
@@ -24,14 +24,14 @@
 - [x] `SwiftUI + AppKit` 前台窗口壳
 - [x] compact / expanded 两种布局
 - [x] quick chat 占位交互
-- [x] AgentHub bridge client 占位层
+- [x] Companion bridge client 占位层
 - [x] 初版文档和后续清单
 
 ### 接下来必须完成
 
 - [ ] 定义本地 bridge 协议
-- [ ] 从 Companion 发起 quick chat 到 AgentHub
-- [ ] 从 AgentHub 回推 thread summary / pending approval / done 状态
+- [ ] 从 Companion 发起 quick chat 到后台系统
+- [ ] 从后台系统回推 thread summary / pending approval / done 状态
 - [ ] Companion 打开主控制台时，能精确跳到对应 thread / review
 - [ ] menu bar 常驻和全局快捷键
 - [ ] Companion 生命周期和后台保活
@@ -71,7 +71,7 @@
 
 ### `Services`
 
-- AgentHub bridge client
+- Companion bridge client
 - event subscription
 - local persistence
 - notification bridge
@@ -84,7 +84,7 @@
 - quick chat draft
 - memory summary
 
-## 需要 AgentHub 提供的能力
+## 需要后台系统提供的能力
 
 - [ ] 新建或继续一条 thread
 - [ ] 把 quick chat 作为 message turn 投递到指定 thread
@@ -96,7 +96,7 @@
 
 ## 下一线程建议的起手顺序
 
-1. 先把 `AgentHubBridgeClient` 从 stub 改成真实本地通信层
+1. 先把 `CompanionBridgeClient` 从 stub 改成真实本地通信层
 2. 再把 `CompanionAppModel` 接到真实 thread 状态
 3. 然后补 menu bar 和 global shortcut
 4. 最后才开始做桌宠动画和个性化外壳

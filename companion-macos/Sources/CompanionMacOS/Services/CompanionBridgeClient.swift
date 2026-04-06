@@ -1,6 +1,6 @@
 import Foundation
 
-actor AgentHubBridgeClient {
+actor CompanionBridgeClient {
     enum ConnectionState: String {
         case disconnected
         case connecting

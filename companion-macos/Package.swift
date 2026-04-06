@@ -3,20 +3,20 @@
 import PackageDescription
 
 let package = Package(
-    name: "AgentHubCompanionMacOS",
+    name: "CompanionMacOS",
     platforms: [
         .macOS(.v14)
     ],
     products: [
         .executable(
-            name: "AgentHubCompanionMacOS",
-            targets: ["AgentHubCompanionMacOS"]
+            name: "CompanionMacOS",
+            targets: ["CompanionMacOS"]
         )
     ],
     targets: [
         .executableTarget(
-            name: "AgentHubCompanionMacOS",
-            path: "Sources/AgentHubCompanionMacOS"
+            name: "CompanionMacOS",
+            path: "Sources/CompanionMacOS"
         )
     ]
 )

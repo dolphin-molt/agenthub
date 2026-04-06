@@ -53,17 +53,17 @@ final class CompanionAppModel: ObservableObject {
     @Published var isExpanded = false
     @Published var status: Status = .idle
     @Published var threadTitle = "新 Companion 主线"
-    @Published var currentFocus = "先把原生 macOS 前台壳做出来，再把 AgentHub 作为后台控制台接上。"
-    @Published var recentActivity = "当前是原生 Companion 骨架，AgentHub bridge 还没有接。"
+    @Published var currentFocus = "先把原生 macOS 前台壳做出来，再把现有后台控制台接上。"
+    @Published var recentActivity = "当前是原生 Companion 骨架，后台 bridge 还没有接。"
     @Published var pendingQuestion = "Companion 默认应该是固定停靠，还是允许像桌宠一样轻度移动？"
     @Published var quickDraft = ""
     @Published var activeTaskCount = 1
     @Published var blockedTaskCount = 1
     @Published var doneTaskCount = 0
-    @Published var bridgeState: AgentHubBridgeClient.ConnectionState = .disconnected
-    @Published var lastDispatchNote = "还没有把消息真正送到 AgentHub。"
+    @Published var bridgeState: CompanionBridgeClient.ConnectionState = .disconnected
+    @Published var lastDispatchNote = "还没有把消息真正送到后台。"
 
-    let bridgeClient = AgentHubBridgeClient()
+    let bridgeClient = CompanionBridgeClient()
 
     func toggleExpanded() {
         isExpanded.toggle()
@@ -96,7 +96,7 @@ final class CompanionAppModel: ObservableObject {
         do {
             try await bridgeClient.enqueueQuickChat(message)
             bridgeState = .connected
-            lastDispatchNote = "已发给 AgentHub backend。后面要把线程、Agent、审批和 memory 一起带上。"
+            lastDispatchNote = "已发给本地后台。后面要把线程、Agent、审批和 memory 一起带上。"
         } catch {
             bridgeState = .error
             lastDispatchNote = "现在还是本地 stub：界面已更新，但 backend bridge 还没接。"

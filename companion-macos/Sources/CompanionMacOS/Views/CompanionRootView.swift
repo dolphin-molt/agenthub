@@ -83,7 +83,7 @@ struct CompanionRootView: View {
 
     private var header: some View {
         HStack {
-            Text("AgentHub Companion")
+            Text("Companion")
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .tracking(2)
                 .foregroundStyle(.white.opacity(0.62))
@@ -214,7 +214,7 @@ struct CompanionRootView: View {
                         await model.submitQuickDraft()
                     }
                 } label: {
-                    Text("发给 AgentHub")
+                    Text("发给后台")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
@@ -235,7 +235,7 @@ struct CompanionRootView: View {
         HStack {
             ConnectionPill(state: model.bridgeState)
             Spacer()
-            Text("后台 AgentHub bridge、memory、审批流都还没接。")
+            Text("后台 bridge、memory、审批流都还没接。")
                 .font(.system(size: 12, weight: .regular, design: .rounded))
                 .foregroundStyle(.white.opacity(0.58))
         }
@@ -334,7 +334,7 @@ private struct StatusCapsule: View {
 }
 
 private struct ConnectionPill: View {
-    let state: AgentHubBridgeClient.ConnectionState
+    let state: CompanionBridgeClient.ConnectionState
 
     var body: some View {
         HStack(spacing: 8) {

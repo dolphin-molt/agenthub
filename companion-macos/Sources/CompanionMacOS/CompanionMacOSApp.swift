@@ -1,12 +1,12 @@
 import SwiftUI
 
 @main
-struct AgentHubCompanionMacOSApp: App {
+struct CompanionMacOSApp: App {
     @StateObject private var model = CompanionAppModel()
     @StateObject private var windowController = CompanionWindowController()
 
     var body: some Scene {
-        WindowGroup("AgentHub Companion") {
+        WindowGroup("Companion") {
             CompanionRootView(model: model)
                 .background(
                     WindowAccessor { window in
@@ -30,9 +30,9 @@ struct AgentHubCompanionMacOSApp: App {
 private struct SettingsPlaceholderView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("AgentHub Companion")
+            Text("Companion")
                 .font(.title2.weight(.semibold))
-            Text("这里后面会放 Companion 的个性化设置、通知偏好、桌面行为和 AgentHub 连接配置。")
+            Text("这里后面会放 Companion 的个性化设置、通知偏好、桌面行为和后台连接配置。")
                 .foregroundStyle(.secondary)
         }
         .padding(24)
